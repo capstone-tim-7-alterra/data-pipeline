@@ -1,0 +1,6 @@
+google-cloud-bigquery==3.24.0
+psycopg2-binary==2.9.9
+pandas==2.2.2
+prefect==2.19.5
+prefect-gcp==0.5.12
+prefect-github==0.2.6

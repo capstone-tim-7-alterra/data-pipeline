@@ -1,15 +1,12 @@
-import os
 import psycopg2
 import pandas as pd
-import prefect
+
 from prefect import task, flow
-from prefect.tasks import task_input_hash
 from prefect.variables import Variable
 from prefect.blocks.system import Secret
 from prefect_gcp import GcpCredentials
 
 from google.cloud import bigquery
-from google.oauth2 import service_account
 
 from datetime import datetime, timedelta
 
@@ -24,7 +21,7 @@ client = bigquery.Client(credentials=google_auth_creds)
 
 
 #task for extracting data from database
-@task(retries=3, retry_delay_seconds=60, cache_key_fn=task_input_hash)
+@task(retries=3, retry_delay_seconds=60)
 def extract_data(table_name):
     last_extracted_at = Variable.get("last_extracted_at", default=None)
     if last_extracted_at is not None:
@@ -96,13 +93,6 @@ def transform_products(products):
     
     return df_transformed
 
-@task(task_run_name="transform_product_variants")
-def transform_product_variants(product_variants):
-    timestamps = ['created_at', 'updated_at', 'deleted_at']
-    df_transformed = product_variants[['id', 'product_id', 'size', 'stock'] + timestamps]
-    
-    return df_transformed
-
 @task(task_run_name="transform_product_transactions")
 def transform_product_transactions(product_transactions, product_transaction_items, product_variants, products):
     df_transformed = (
@@ -124,8 +114,17 @@ def transform_events(events):
     return df_transformed
 
 @task()
-def transform_event_transactions(event_transactions, event_transaction_items, event_locations, event):
-    pass
+def transform_event_transactions(event_transactions, event_transaction_items, event_prices, events):
+    df_transformed = (
+        event_transactions
+        .merge(event_transaction_items, left_on='id', right_on='event_transaction_id')
+        .merge(event_prices, left_on='event_prices_id', right_on='id')
+        .merge(events, left_on='event_id_x', right_on='id', suffixes=["_a","_b"])
+        [['id_x', 'user_id', 'event_id_x', 'category_id', 'ticket_type_id', 'transaction_date','transaction_method_id', 'quantity','price', 'total_amount']]
+        .rename(columns={'id_x': 'id', 'event_id_x': 'event_id'})
+    )
+    
+    return df_transformed
 
 #task for loading data into bigquery
 @task(retries=3, retry_delay_seconds=60)
@@ -177,11 +176,11 @@ def load_data(df, table_name, primary_key="id"):
     job = client.query(truncate_query)
     job.result()
 
-@flow(name="etl-pipeline", log_prints=True)
+@flow(name="etl-flow", log_prints=True)
 def data_pipeline():
     
     # defines table names to be extracted and loaded
-    tables = ['users', 'user_addresses', 'products', 'product_categories', 'product_pricings', 'product_reviews', 'events', 'event_categories', 'event_locations']
+    tables = ['users', 'user_addresses', 'products', 'product_categories', 'product_pricings', 'product_reviews', 'events', 'event_categories', 'event_locations', 'event_prices', 'event_ticket_types']
 
     extracted_data = {}
     for table in tables:
@@ -201,7 +200,10 @@ def data_pipeline():
         'product_reviews': extracted_data['product_reviews'],
         'events': df_events,
         'event_categories': extracted_data['event_categories'],
-        'event_locations': extracted_data['event_locations']
+        'event_locations': extracted_data['event_locations'],
+        'event_prices': extracted_data['event_prices'],
+        'event_ticket_types': extracted_data['event_ticket_types'],
+        
     }
 
     for table, df in load_tables.items():

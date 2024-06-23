@@ -23,9 +23,9 @@ client = bigquery.Client(credentials=google_auth_creds)
 #task for extracting data from database
 @task(retries=3, retry_delay_seconds=60)
 def extract_data(table_name):
-    last_extracted_at = Variable.get("last_extracted_at", default=None)
-    if last_extracted_at is not None:
-        last_extracted_at = datetime.fromisoformat(last_extracted_at)
+    get_last_extracted_at = Variable.get("last_extracted_at", default=None)
+    if get_last_extracted_at is not None:
+        last_extracted_at = datetime.fromisoformat(get_last_extracted_at.value)
     else:
         last_extracted_at = datetime.now() - timedelta(days=20)
 
@@ -73,62 +73,90 @@ def extract_data(table_name):
 #task for transforming data
 @task(task_run_name="transform_users")
 def transform_users(users):
-    timestamps = ['created_at', 'updated_at', 'deleted_at']
-    users['fullname'] = users['first_name'] + ' ' + users['last_name']
-    df_transformed = users[['id', 'fullname', 'email', 'phone', 'gender', 'date_of_birth'] + timestamps]
-    
-    return df_transformed
+    if users is not None:
+        timestamps = ['created_at', 'updated_at', 'deleted_at']
+        users['fullname'] = users['first_name'] + ' ' + users['last_name']
+        df_transformed = users[['id', 'fullname', 'email', 'phone', 'gender', 'date_of_birth'] + timestamps]
+        
+        return df_transformed
+    else:
+        print("Empty DataFrame from extract_data")
+        return None
 
 @task(task_run_name="transform_user_addresses")
 def transform_user_address(addresses):
-    timestamps = ['created_at', 'updated_at', 'deleted_at']
-    df_transformed = addresses[['id', 'user_id', 'label', 'address', 'city', 'province', 'postal_code', 'is_primary'] + timestamps]
-    
-    return df_transformed
+    if addresses is not None:
+        timestamps = ['created_at', 'updated_at', 'deleted_at']
+        df_transformed = addresses[['id', 'user_id', 'label', 'address', 'city', 'province', 'postal_code', 'is_primary'] + timestamps]
+        
+        return df_transformed
+    else:
+        print("Empty DataFrame from extract_data")
+        return None
 
 @task(task_run_name="transform_products")
 def transform_products(products):
-    timestamps = ['created_at', 'updated_at', 'deleted_at']
-    df_transformed = products[['id', 'category_id', 'name', 'description'] + timestamps]
-    
-    return df_transformed
+    if products is not None:
+        timestamps = ['created_at', 'updated_at', 'deleted_at']
+        df_transformed = products[['id', 'category_id', 'name', 'description'] + timestamps]
+        
+        return df_transformed
+    else:
+        print("Empty DataFrame from extract_data")
+        return None
 
 @task(task_run_name="transform_product_transactions")
 def transform_product_transactions(product_transactions, product_transaction_items, product_variants, products):
-    df_transformed = (
-        product_transactions
-        .merge(product_transaction_items, left_on='id', right_on='product_transaction_id')
-        .merge(product_variants, left_on='product_variant_id', right_on='id')
-        .merge(products, left_on='product_id', right_on='id', suffixes=["_a", '_b'])
-        [['id_x', 'user_id', 'product_id', 'category_id', 'transaction_method_id', 'quantity', 'total_amount']]
-        .rename(columns={'id_x': 'id'})
-    )
+    if product_transactions is not None:
+        df_transformed = (
+            product_transactions
+            .merge(product_transaction_items, left_on='id', right_on='product_transaction_id')
+            .merge(product_variants, left_on='product_variant_id', right_on='id')
+            .merge(products, left_on='product_id', right_on='id', suffixes=["_a", '_b'])
+            [['id_x', 'user_id', 'product_id', 'category_id', 'transaction_method_id', 'quantity', 'total_amount']]
+            .rename(columns={'id_x': 'id'})
+        )
     
-    return df_transformed
+        return df_transformed
+    else:
+        print("Empty DataFrame from extract_data")
+        return None
 
 @task(task_run_name="transform_events")
 def transform_events(events):
-    timestamps = ['created_at', 'updated_at', 'deleted_at']
-    df_transformed = events[['id', 'location_id', 'category_id', 'name', 'description', 'date'] + timestamps]
-    
-    return df_transformed
+    if events is not None:
+        timestamps = ['created_at', 'updated_at', 'deleted_at']
+        df_transformed = events[['id', 'location_id', 'category_id', 'name', 'description', 'date'] + timestamps]
+        
+        return df_transformed
+    else:
+        print("Empty DataFrame from extract_data")
+        return None
 
 @task()
 def transform_event_transactions(event_transactions, event_transaction_items, event_prices, events):
-    df_transformed = (
-        event_transactions
-        .merge(event_transaction_items, left_on='id', right_on='event_transaction_id')
-        .merge(event_prices, left_on='event_prices_id', right_on='id')
-        .merge(events, left_on='event_id_x', right_on='id', suffixes=["_a","_b"])
-        [['id_x', 'user_id', 'event_id_x', 'category_id', 'ticket_type_id', 'transaction_date','transaction_method_id', 'quantity','price', 'total_amount']]
-        .rename(columns={'id_x': 'id', 'event_id_x': 'event_id'})
-    )
+    if event_transactions is not None:
+        df_transformed = (
+            event_transactions
+            .merge(event_transaction_items, left_on='id', right_on='event_transaction_id')
+            .merge(event_prices, left_on='event_prices_id', right_on='id')
+            .merge(events, left_on='event_id_x', right_on='id', suffixes=["_a","_b"])
+            [['id_x', 'user_id', 'event_id_x', 'category_id', 'ticket_type_id', 'transaction_date','transaction_method_id', 'quantity','price', 'total_amount']]
+            .rename(columns={'id_x': 'id', 'event_id_x': 'event_id'})
+        )
     
-    return df_transformed
+        return df_transformed
+    else:
+        print("Empty DataFrame from extract_data")
+        return None
 
 #task for loading data into bigquery
 @task(retries=3, retry_delay_seconds=60)
 def load_data(df, table_name, primary_key="id"):
+    
+    if df is None:
+        print(f"No data to load into {table_name}")
+        return
     
     project_id = 'de-cloud-07'
     table_id = f"{project_id}.kreasi_nusantara.{table_name}"
@@ -186,28 +214,43 @@ def data_pipeline():
     for table in tables:
         extracted_data[table] = extract_data.with_options(task_run_name=f"extract_{table}")(table)
 
-    df_users = transform_users(extracted_data['users'])
-    df_user_addresses = transform_user_address(extracted_data['user_addresses'])
-    df_products = transform_products(extracted_data['products'])
-    df_events = transform_events(extracted_data['events'])
+    # Handle None results from extraction tasks
+    tables_to_remove = []  # Create a separate list to store tables to remove
+    for table, df in extracted_data.items():
+        if df is None:
+            print(f"Extract task returned None for {table}. Skipping this table.")
+            tables_to_remove.append(table)
+
+    # Remove the tables outside the iteration
+    for table in tables_to_remove:
+        del extracted_data[table]
+    
+    if not extracted_data:
+        print("Extract task returned empty DataFrame for all tables")
+        return
+
+    df_users = transform_users(extracted_data.get('users'))
+    df_user_addresses = transform_user_address(extracted_data.get('user_addresses'))
+    df_products = transform_products(extracted_data.get('products'))
+    df_events = transform_events(extracted_data.get('events'))
 
     load_tables = {
         'users': df_users, 
         'user_addresses': df_user_addresses, 
         'products': df_products, 
-        'product_categories': extracted_data['product_categories'],
-        'product_pricings' : extracted_data['product_pricings'],
-        'product_reviews': extracted_data['product_reviews'],
+        'product_categories': extracted_data.get('product_categories'),
+        'product_pricings' : extracted_data.get('product_pricings'),
+        'product_reviews': extracted_data.get('product_reviews'),
         'events': df_events,
-        'event_categories': extracted_data['event_categories'],
-        'event_locations': extracted_data['event_locations'],
-        'event_prices': extracted_data['event_prices'],
-        'event_ticket_types': extracted_data['event_ticket_types'],
+        'event_categories': extracted_data.get('event_categories'),
+        'event_locations': extracted_data.get('event_locations'),
+        'event_prices': extracted_data.get('event_prices'),
+        'event_ticket_types': extracted_data.get('event_ticket_types'),
         
     }
 
     for table, df in load_tables.items():
         load_data.with_options(task_run_name=f"load_{table}")(df, table)
     
-    # last_extracted_at = datetime.now().isoformat()
-    # Variable.set(name="last_extracted_at", value=last_extracted_at, overwrite=True)
+    last_extracted_at = datetime.now().isoformat()
+    Variable.set(name="last_extracted_at", value=last_extracted_at, overwrite=True)
